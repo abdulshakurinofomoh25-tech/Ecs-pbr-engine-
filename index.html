@@ -1,0 +1,1662 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>3D PBR Real-Time Studio Mobile Viewer & Exporter</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Three.js Core and Loaders/Exporters via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    
+    <!-- Three.js Exporters & Draco Encoder -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/DRACOExporter.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/OBJExporter.js"></script>
+
+    <!-- Three.js Postprocessing & Shaders for Unreal Bloom -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+
+    <style>
+        :root {
+            --sat: env(safe-area-inset-top);
+            --sab: env(safe-area-inset-bottom);
+            --sal: env(safe-area-inset-left);
+            --sar: env(safe-area-inset-right);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            background-color: #090d16;
+            color: #f8fafc;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: none;
+        }
+
+        /* Glassmorphism styling optimized for GPU */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.82);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .glass-button {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            transition: all 0.15s ease;
+            min-height: 44px;
+            min-width: 44px;
+        }
+        .glass-button:active {
+            transform: scale(0.96);
+            background: rgba(255, 255, 255, 0.22);
+        }
+
+        /* Custom Touch-Friendly Range Sliders */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.12);
+            height: 8px;
+            border-radius: 4px;
+            outline: none;
+            touch-action: manipulation;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #3b82f6;
+            border: 2px solid #ffffff;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+        }
+
+        /* Safe area spacing utilities */
+        .pt-safe { padding-top: max(1rem, var(--sat)); }
+        .pb-safe { padding-bottom: max(1rem, var(--sab)); }
+        .bottom-safe { bottom: max(1rem, var(--sab)); }
+
+        .drawer-slide {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative m-0 p-0 overflow-hidden bg-slate-950">
+
+    <!-- 3D Canvas Viewport -->
+    <div id="viewport-container" class="w-full h-full absolute inset-0">
+        <canvas id="webgl-canvas" class="w-full h-full block"></canvas>
+    </div>
+
+    <!-- Top Navigation Overlay -->
+    <header class="absolute top-0 left-0 right-0 z-20 p-4 pt-safe flex justify-between items-center pointer-events-none">
+        <!-- Logo & Model Title Badge -->
+        <div class="glass-panel px-3.5 py-2 rounded-2xl flex items-center space-x-3 pointer-events-auto shadow-xl max-w-[60%] sm:max-w-xs">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-white text-xs shadow-md shrink-0">
+                PBR
+            </div>
+            <div class="truncate">
+                <h1 id="model-name" class="text-xs font-bold text-white tracking-wide truncate">Instant Studio Engine</h1>
+                <p id="model-info" class="text-[10px] text-slate-400 truncate">PBR Real-Time &bull; Bloom & LocalStorage</p>
+            </div>
+        </div>
+
+        <!-- Top Right Action Controls -->
+        <div class="flex items-center space-x-2 pointer-events-auto">
+            <label title="Upload 3D Model (.glb, .gltf, .obj, .drc)" class="glass-button rounded-2xl text-blue-400 px-3 py-2 flex items-center space-x-1.5 text-xs font-semibold cursor-pointer">
+                <i class="fa-solid fa-cloud-arrow-up text-xs"></i>
+                <span class="hidden sm:inline">Upload</span>
+                <input type="file" id="top-model-input" accept=".glb,.gltf,.obj,.drc" class="hidden">
+            </label>
+            <button id="btn-perf-toggle" title="Performance Preset" class="glass-button rounded-2xl text-blue-400 px-3 py-2 flex items-center space-x-1.5 text-xs font-semibold">
+                <i class="fa-solid fa-bolt text-xs"></i>
+                <span id="perf-badge">HIGH</span>
+            </button>
+            <button id="btn-screenshot" title="Take Snapshot" class="glass-button rounded-2xl text-slate-200 hover:text-white px-3 py-2 flex items-center space-x-1.5 text-xs font-medium">
+                <i class="fa-solid fa-camera text-sm"></i>
+            </button>
+            <button id="btn-toggle-ui" title="Toggle Controls" class="glass-button rounded-2xl text-slate-200 hover:text-white px-3 py-2">
+                <i class="fa-solid fa-sliders text-base"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Floating Quick Action Bar (Bottom Center) -->
+    <div id="quick-toolbar" class="absolute bottom-safe left-1/2 transform -translate-x-1/2 z-20 flex items-center space-x-2 glass-panel p-2 rounded-2xl shadow-2xl transition-all duration-300">
+        <button id="btn-quick-gold" title="Gold Preset" class="w-9 h-9 rounded-xl bg-amber-500 border border-amber-300/40 active:scale-95 transition shadow"></button>
+        <button id="btn-quick-chrome" title="Chrome Preset" class="w-9 h-9 rounded-xl bg-slate-300 border border-white/50 active:scale-95 transition shadow"></button>
+        <button id="btn-quick-glass" title="Glass Preset" class="w-9 h-9 rounded-xl bg-blue-400/40 border border-blue-200/60 active:scale-95 transition shadow"></button>
+        <div class="w-px h-6 bg-slate-700/80 mx-0.5"></div>
+        <button id="btn-focus-mesh" title="Focus Mesh" class="glass-button rounded-xl text-slate-200 px-3 text-xs font-medium flex items-center gap-1.5">
+            <i class="fa-solid fa-expand text-xs"></i>
+            <span class="hidden sm:inline">Focus</span>
+        </button>
+        <button id="btn-open-drawer" class="glass-button rounded-xl text-blue-400 px-3 text-xs font-semibold flex items-center gap-1">
+            <i class="fa-solid fa-sliders"></i>
+            <span>Controls</span>
+        </button>
+    </div>
+
+    <!-- Mobile Drawer Controls Sheet -->
+    <div id="controls-drawer" class="drawer-slide fixed inset-x-0 bottom-0 z-30 max-h-[85vh] sm:max-h-[680px] sm:w-[450px] sm:left-auto sm:right-4 sm:bottom-4 glass-panel rounded-t-3xl sm:rounded-3xl flex flex-col shadow-2xl translate-y-full">
+        <!-- Drawer Header & Handle -->
+        <div class="px-5 py-3 border-b border-slate-700/50 flex flex-col items-center relative">
+            <div class="w-12 h-1.5 bg-slate-600/80 rounded-full mb-3 sm:hidden"></div>
+            <div class="w-full flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-cubes text-blue-400 text-sm"></i>
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-slate-200">Engine & Material Controls</h2>
+                </div>
+                <button id="btn-close-drawer" class="w-8 h-8 rounded-full glass-button flex items-center justify-center text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Touch Nav Tabs -->
+        <div class="flex border-b border-slate-700/50 bg-slate-900/60 text-xs font-medium">
+            <button id="tab-btn-material" class="flex-1 py-3 text-center text-blue-400 border-b-2 border-blue-500 font-semibold focus:outline-none transition">Material</button>
+            <button id="tab-btn-env" class="flex-1 py-3 text-center text-slate-400 border-b-2 border-transparent focus:outline-none transition">Lighting</button>
+            <button id="tab-btn-mesh" class="flex-1 py-3 text-center text-slate-400 border-b-2 border-transparent focus:outline-none transition">Geometry</button>
+            <button id="tab-btn-export" class="flex-1 py-3 text-center text-slate-400 border-b-2 border-transparent focus:outline-none transition">Export</button>
+            <button id="tab-btn-engine" class="flex-1 py-3 text-center text-slate-400 border-b-2 border-transparent focus:outline-none transition">Engine</button>
+        </div>
+
+        <!-- Scrollable Tab Content Container -->
+        <div class="flex-1 overflow-y-auto p-5 space-y-6 text-xs pb-safe">
+
+            <!-- TAB 1: MATERIAL SHADING CONTROLS -->
+            <div id="tab-content-material" class="space-y-5">
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-2">PBR Presets</label>
+                    <div class="grid grid-cols-4 gap-2">
+                        <button class="btn-preset bg-amber-600/25 active:bg-amber-600/50 border border-amber-500/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="gold">Gold</button>
+                        <button class="btn-preset bg-slate-400/25 active:bg-slate-400/50 border border-slate-300/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="chrome">Chrome</button>
+                        <button class="btn-preset bg-blue-600/25 active:bg-blue-600/50 border border-blue-400/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="glass">Glass</button>
+                        <button class="btn-preset bg-red-600/25 active:bg-red-600/50 border border-red-400/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="car-paint">Car Paint</button>
+                        <button class="btn-preset bg-emerald-600/25 active:bg-emerald-600/50 border border-emerald-400/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="emerald">Plastic</button>
+                        <button class="btn-preset bg-stone-500/25 active:bg-stone-500/50 border border-stone-400/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="ceramic">Ceramic</button>
+                        <button class="btn-preset bg-purple-600/25 active:bg-purple-600/50 border border-purple-400/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="velvet">Sci-Fi</button>
+                        <button class="btn-preset bg-yellow-900/25 active:bg-yellow-900/50 border border-yellow-700/40 p-2.5 rounded-xl text-center text-[11px] font-medium" data-preset="leather">Copper</button>
+                    </div>
+                </div>
+
+                <div class="space-y-4 pt-3 border-t border-slate-700/40">
+                    <div class="flex justify-between items-center h-10">
+                        <label for="color-picker" class="font-medium text-slate-300">Base Albedo Color</label>
+                        <input type="color" id="color-picker" value="#ffffff" class="w-10 h-10 rounded-xl border-none cursor-pointer bg-transparent">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Roughness</label>
+                            <span id="val-roughness" class="text-slate-400 font-mono">0.20</span>
+                        </div>
+                        <input type="range" id="input-roughness" min="0" max="1" step="0.01" value="0.2" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Metalness</label>
+                            <span id="val-metalness" class="text-slate-400 font-mono">0.80</span>
+                        </div>
+                        <input type="range" id="input-metalness" min="0" max="1" step="0.01" value="0.8" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Transmission (Glass Effect)</label>
+                            <span id="val-transmission" class="text-slate-400 font-mono">0.00</span>
+                        </div>
+                        <input type="range" id="input-transmission" min="0" max="1" step="0.01" value="0.0" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Clearcoat Coating</label>
+                            <span id="val-clearcoat" class="text-slate-400 font-mono">0.00</span>
+                        </div>
+                        <input type="range" id="input-clearcoat" min="0" max="1" step="0.01" value="0.0" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Emission Strength</label>
+                            <span id="val-emission" class="text-slate-400 font-mono">0.00</span>
+                        </div>
+                        <input type="range" id="input-emission" min="0" max="2" step="0.05" value="0.0" class="w-full">
+                    </div>
+
+                    <div class="flex justify-between items-center pt-2">
+                        <label class="text-slate-300 font-medium">Wireframe Overlay</label>
+                        <input type="checkbox" id="input-wireframe" class="w-5 h-5 rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0">
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: ENVIRONMENT & LIGHTING -->
+            <div id="tab-content-env" class="space-y-5 hidden">
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-2">Lighting Environment Map</label>
+                    <select id="select-hdri" class="w-full bg-slate-800/90 border border-slate-700 text-slate-200 rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500">
+                        <option value="studio">Studio Neutral (Procedural HDRI)</option>
+                    </select>
+                </div>
+
+                <div class="space-y-4 pt-2 border-t border-slate-700/40">
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Unreal Bloom Intensity</label>
+                            <span id="val-bloom" class="text-slate-400 font-mono">0.00</span>
+                        </div>
+                        <input type="range" id="input-bloom" min="0" max="3" step="0.05" value="0.0" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Env Exposure</label>
+                            <span id="val-exposure" class="text-slate-400 font-mono">1.00</span>
+                        </div>
+                        <input type="range" id="input-exposure" min="0.1" max="2.5" step="0.05" value="1.0" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Key Light Intensity</label>
+                            <span id="val-light-intensity" class="text-slate-400 font-mono">1.50</span>
+                        </div>
+                        <input type="range" id="input-light-intensity" min="0" max="4" step="0.1" value="1.5" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Light Direction Angle</label>
+                            <span id="val-light-rotation" class="text-slate-400 font-mono">45°</span>
+                        </div>
+                        <input type="range" id="input-light-rotation" min="0" max="360" step="1" value="45" class="w-full">
+                    </div>
+                </div>
+
+                <div class="space-y-3 pt-2 border-t border-slate-700/40">
+                    <label class="block font-semibold text-slate-300">Background Backdrop</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="bg-btn-hdri" class="py-2.5 rounded-xl border border-blue-500/50 bg-blue-500/20 text-slate-200 font-medium">HDRI Map</button>
+                        <button id="bg-btn-color" class="py-2.5 rounded-xl border border-slate-700 bg-slate-800/50 text-slate-400 font-medium">Solid Color</button>
+                    </div>
+
+                    <div id="bg-color-container" class="flex justify-between items-center hidden pt-1">
+                        <label class="text-slate-300">Background Color</label>
+                        <input type="color" id="bg-color-picker" value="#090d16" class="w-8 h-8 rounded-xl border-none cursor-pointer bg-transparent">
+                    </div>
+
+                    <div class="flex justify-between items-center pt-2">
+                        <label class="text-slate-300 font-medium">Floor Grid Helper</label>
+                        <input type="checkbox" id="input-grid" checked class="w-5 h-5 rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0">
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: GEOMETRY & UPLOADS -->
+            <div id="tab-content-mesh" class="space-y-5 hidden">
+                <!-- Custom Upload Section -->
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-2">Upload Custom 3D Model</label>
+                    <label class="w-full bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 p-3.5 rounded-2xl flex items-center justify-center space-x-2.5 cursor-pointer transition shadow-lg">
+                        <i class="fa-solid fa-cloud-arrow-up text-blue-400 text-base"></i>
+                        <span class="font-bold text-white text-xs">Choose .GLB, .GLTF, .OBJ, .DRC</span>
+                        <input type="file" id="custom-model-input" accept=".glb,.gltf,.obj,.drc" class="hidden">
+                    </label>
+                    <p class="text-[10px] text-slate-400 text-center mt-1.5">Tip: Drag & drop 3D models or Draco files directly into viewport.</p>
+                </div>
+
+                <div class="pt-3 border-t border-slate-700/40">
+                    <label class="block font-semibold text-slate-300 mb-2">Built-In Sample Geometry</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button class="btn-mesh bg-slate-800/80 hover:bg-slate-700 border border-slate-700 p-3 rounded-2xl text-center flex flex-col items-center gap-1.5" data-mesh="sphere">
+                            <i class="fa-solid fa-circle text-xl text-blue-400"></i>
+                            <span class="text-[11px] font-medium">Sphere</span>
+                        </button>
+                        <button class="btn-mesh bg-slate-800/80 hover:bg-slate-700 border border-slate-700 p-3 rounded-2xl text-center flex flex-col items-center gap-1.5" data-mesh="knot">
+                            <i class="fa-solid fa-dharmachakra text-xl text-purple-400"></i>
+                            <span class="text-[11px] font-medium">Torus Knot</span>
+                        </button>
+                        <button class="btn-mesh bg-slate-800/80 hover:bg-slate-700 border border-slate-700 p-3 rounded-2xl text-center flex flex-col items-center gap-1.5" data-mesh="drone">
+                            <i class="fa-solid fa-compact-disc text-xl text-emerald-400"></i>
+                            <span class="text-[11px] font-medium">Sci-Fi Core</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pt-2 border-t border-slate-700/40 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-slate-300 font-medium">Auto Turn-Table Rotation</label>
+                        <input type="checkbox" id="input-autorotate" class="w-5 h-5 rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0">
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: EXPORT SUITE & LOCAL STORAGE -->
+            <div id="tab-content-export" class="space-y-5 hidden">
+                <!-- Local Storage Section -->
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-1">Project Local Storage</label>
+                    <p class="text-[11px] text-slate-400 mb-3">Save or load your studio configuration, bloom, and material settings locally.</p>
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <button id="btn-save-storage" class="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 p-3 rounded-xl flex items-center justify-center space-x-2 transition">
+                            <i class="fa-solid fa-floppy-disk text-emerald-400 text-sm"></i>
+                            <span class="font-bold text-white text-xs">Save Project</span>
+                        </button>
+                        <button id="btn-load-storage" class="bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 p-3 rounded-xl flex items-center justify-center space-x-2 transition">
+                            <i class="fa-solid fa-folder-open text-blue-400 text-sm"></i>
+                            <span class="font-bold text-white text-xs">Load Project</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pt-3 border-t border-slate-700/40">
+                    <label class="block font-semibold text-slate-300 mb-1">Export Formats</label>
+                    <p class="text-[11px] text-slate-400 mb-3">Convert and download active 3D model with optional Draco compression.</p>
+
+                    <!-- Draco Compression Level Setting -->
+                    <div class="bg-slate-800/60 p-3 rounded-xl mb-3 border border-slate-700/60">
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium text-[11px]">Draco Compression Level</label>
+                            <span id="val-draco-level" class="text-blue-400 font-mono font-bold text-[11px]">7</span>
+                        </div>
+                        <input type="range" id="input-draco-level" min="1" max="10" step="1" value="7" class="w-full">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <button id="btn-export-draco" class="bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/50 p-3 rounded-xl flex items-center space-x-3 transition col-span-2">
+                            <i class="fa-solid fa-file-zipper text-cyan-400 text-xl"></i>
+                            <div class="text-left">
+                                <div class="font-bold text-white text-xs">Export .GLB (Draco Compressed)</div>
+                                <div class="text-[10px] text-cyan-200/70">Ultra Compact Mesh Storage</div>
+                            </div>
+                        </button>
+
+                        <button id="btn-export-glb" class="bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 p-3 rounded-xl flex items-center space-x-3 transition">
+                            <i class="fa-solid fa-cube text-blue-400 text-lg"></i>
+                            <div class="text-left">
+                                <div class="font-bold text-white text-xs">Export .GLB</div>
+                                <div class="text-[10px] text-slate-400">Binary Uncompressed</div>
+                            </div>
+                        </button>
+
+                        <button id="btn-export-gltf" class="bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/50 p-3 rounded-xl flex items-center space-x-3 transition">
+                            <i class="fa-solid fa-file-code text-indigo-400 text-lg"></i>
+                            <div class="text-left">
+                                <div class="font-bold text-white text-xs">Export .GLTF</div>
+                                <div class="text-[10px] text-slate-400">JSON + External Buffers</div>
+                            </div>
+                        </button>
+
+                        <button id="btn-export-obj" class="bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 p-3 rounded-xl flex items-center space-x-3 transition">
+                            <i class="fa-solid fa-shapes text-amber-400 text-lg"></i>
+                            <div class="text-left">
+                                <div class="font-bold text-white text-xs">Export .OBJ</div>
+                                <div class="text-[10px] text-slate-400">Wavefront Geometry</div>
+                            </div>
+                        </button>
+
+                        <button id="btn-export-json" class="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 p-3 rounded-xl flex items-center space-x-3 transition">
+                            <i class="fa-solid fa-brackets-curly text-emerald-400 text-lg"></i>
+                            <div class="text-left">
+                                <div class="font-bold text-white text-xs">Export .JSON</div>
+                                <div class="text-[10px] text-slate-400">Three.js Scene Object</div>
+                            </div>
+                        </button>
+                    </div>
+
+                    <div class="mt-2.5">
+                        <button id="btn-export-csv" class="w-full bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/50 p-3 rounded-xl flex items-center justify-center space-x-2 transition">
+                            <i class="fa-solid fa-table text-purple-400 text-sm"></i>
+                            <span class="font-bold text-white text-xs">Export Mesh Vertices to .CSV File</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 5: MOBILE ENGINE & PERFORMANCE OPTIMIZATION -->
+            <div id="tab-content-engine" class="space-y-5 hidden">
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-2">Performance Quality Profile</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button class="btn-perf-preset bg-slate-800 border border-slate-700 p-3 rounded-xl text-center" data-quality="high">
+                            <div class="text-xs font-bold text-blue-400">HIGH</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">Shadows + Max DPR</div>
+                        </button>
+                        <button class="btn-perf-preset bg-slate-800 border border-slate-700 p-3 rounded-xl text-center" data-quality="medium">
+                            <div class="text-xs font-bold text-amber-400">MED</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">Optimized DPR</div>
+                        </button>
+                        <button class="btn-perf-preset bg-slate-800 border border-slate-700 p-3 rounded-xl text-center" data-quality="low">
+                            <div class="text-xs font-bold text-emerald-400">LOW</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">Max Performance</div>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-4 pt-2 border-t border-slate-700/40">
+                    <div class="flex justify-between items-center">
+                        <label class="text-slate-300 font-medium">Real-Time Shadow Map</label>
+                        <input type="checkbox" id="input-shadows" checked class="w-5 h-5 rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0">
+                    </div>
+
+                    <div class="flex justify-between items-center">
+                        <label class="text-slate-300 font-medium">Adaptive Auto-FPS Downscale</label>
+                        <input type="checkbox" id="input-autofps" checked class="w-5 h-5 rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-slate-300 font-medium">Camera Field of View (FOV)</label>
+                            <span id="val-fov" class="text-slate-400 font-mono">45°</span>
+                        </div>
+                        <input type="range" id="input-fov" min="20" max="90" step="1" value="45" class="w-full">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Drawer Footer Stats Bar -->
+        <div class="px-5 py-3 border-t border-slate-700/50 bg-slate-900/90 flex items-center justify-between text-[11px] text-slate-400 rounded-b-3xl">
+            <span class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>WebGPU/WebGL Modular Engine</span>
+            </span>
+            <span id="fps-counter" class="text-emerald-400 font-mono font-bold">60 FPS</span>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Gesture Hint Indicator Overlay -->
+    <div id="gesture-hint" class="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-10 glass-panel px-4 py-2 rounded-full text-[11px] text-slate-300 pointer-events-none flex items-center space-x-3 shadow-xl transition-opacity duration-500 opacity-90">
+        <span><i class="fa-solid fa-hand-pointer text-blue-400 mr-1"></i> Rotate</span>
+        <span>&bull;</span>
+        <span><i class="fa-solid fa-hand-line text-blue-400 mr-1"></i> 2-Finger Pan</span>
+    </div>
+
+    <!-- Loading Spinner Overlay -->
+    <div id="loading-spinner" class="absolute inset-0 z-40 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center transition-opacity duration-300 opacity-0 pointer-events-none hidden">
+        <div class="w-14 h-14 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+        <h2 class="text-base font-semibold text-white tracking-wide">Loading 3D Model</h2>
+        <p id="loading-progress" class="text-xs text-slate-400 mt-1">Parsing Draco WASM geometry & PBR shaders...</p>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 glass-panel px-4 py-2.5 rounded-2xl text-xs text-white opacity-0 pointer-events-none transition-all duration-300 flex items-center space-x-2 shadow-2xl">
+        <i id="toast-icon" class="fa-solid fa-circle-info text-blue-400"></i>
+        <span id="toast-msg">Notification</span>
+    </div>
+
+    <!-- CLEAN MODULAR ENGINE & CONTROLLER SCRIPT ARCHITECTURE -->
+    <script>
+        /**
+         * 1. SCENE MANAGER
+         * Handles Scene, Camera, Lighting, Grid, and Procedural Softbox Environment Mapping
+         */
+        class SceneManager {
+            constructor(engine) {
+                this.engine = engine;
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(engine.pbrSettings.bgColor);
+
+                const isMobile = window.innerWidth < 640;
+                this.camera = new THREE.PerspectiveCamera(isMobile ? 55 : 45, window.innerWidth / window.innerHeight, 0.1, 100);
+                this.camera.position.set(0, 1.2, 3.8);
+
+                this.studioEnvMap = null;
+                this.gridHelper = null;
+                this.dirLight = null;
+                this.ambientLight = null;
+
+                this.initLights();
+                this.initGrid();
+            }
+
+            initLights() {
+                this.ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+                this.scene.add(this.ambientLight);
+
+                this.dirLight = new THREE.DirectionalLight(0xffffff, this.engine.pbrSettings.lightIntensity);
+                this.dirLight.position.set(3, 4, 3);
+                this.dirLight.castShadow = true;
+                this.dirLight.shadow.mapSize.width = 1024;
+                this.dirLight.shadow.mapSize.height = 1024;
+                this.dirLight.shadow.bias = -0.0001;
+                this.scene.add(this.dirLight);
+            }
+
+            initGrid() {
+                this.gridHelper = new THREE.GridHelper(10, 20, 0x3b82f6, 0x1e293b);
+                this.gridHelper.position.y = -1;
+                this.scene.add(this.gridHelper);
+            }
+
+            initProceduralHDR(renderer) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+
+                const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                grad.addColorStop(0, '#111827');
+                grad.addColorStop(0.5, '#0f172a');
+                grad.addColorStop(1, '#020617');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                this.drawSoftbox(ctx, 100, 70, 120, 60, '#ffffff', 0.95);
+                this.drawSoftbox(ctx, 380, 80, 150, 70, '#e0f2fe', 0.85);
+                this.drawSoftbox(ctx, 250, 200, 200, 40, '#38bdf8', 0.3);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+
+                const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                pmremGenerator.compileEquirectangularShader();
+
+                this.studioEnvMap = pmremGenerator.fromEquirectangular(texture).texture;
+                this.scene.environment = this.studioEnvMap;
+
+                if (this.engine.pbrSettings.bgType === 'hdri') {
+                    this.scene.background = this.studioEnvMap;
+                }
+
+                pmremGenerator.dispose();
+                texture.dispose();
+            }
+
+            drawSoftbox(ctx, x, y, w, h, color, alpha) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+                const g = ctx.createRadialGradient(x, y, 0, x, y, w / 2);
+                g.addColorStop(0, color);
+                g.addColorStop(1, 'transparent');
+                ctx.fillStyle = g;
+                ctx.globalAlpha = alpha;
+                ctx.fill();
+                ctx.restore();
+            }
+
+            setBackgroundType(type) {
+                this.engine.pbrSettings.bgType = type;
+                if (type === 'hdri') {
+                    this.scene.background = this.studioEnvMap;
+                } else {
+                    this.scene.background = new THREE.Color(this.engine.pbrSettings.bgColor);
+                }
+            }
+
+            setBackgroundColor(hexColor) {
+                this.engine.pbrSettings.bgColor = hexColor;
+                if (this.engine.pbrSettings.bgType === 'color') {
+                    this.scene.background = new THREE.Color(hexColor);
+                }
+            }
+
+            setLightRotation(degrees) {
+                const angle = degrees * (Math.PI / 180);
+                this.dirLight.position.x = Math.cos(angle) * 4;
+                this.dirLight.position.z = Math.sin(angle) * 4;
+            }
+
+            setLightIntensity(val) {
+                this.engine.pbrSettings.lightIntensity = val;
+                this.dirLight.intensity = val;
+            }
+
+            setShadowsEnabled(enabled) {
+                this.dirLight.castShadow = enabled;
+            }
+
+            setGridVisible(visible) {
+                this.gridHelper.visible = visible;
+            }
+
+            onResize(width, height) {
+                const isMobile = width < 640;
+                this.camera.aspect = width / height;
+                this.camera.fov = isMobile ? 55 : 45;
+                this.camera.updateProjectionMatrix();
+            }
+        }
+
+        /**
+         * 2. RENDER PIPELINE MANAGER
+         * Handles WebGLRenderer, EffectComposer, Postprocessing Bloom, and Dynamic Quality Profiles
+         */
+        class RenderPipeline {
+            constructor(engine, canvas) {
+                this.engine = engine;
+                this.canvas = canvas;
+
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: this.canvas,
+                    antialias: true,
+                    preserveDrawingBuffer: true,
+                    powerPreference: "high-performance"
+                });
+
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+                this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                this.renderer.toneMappingExposure = this.engine.pbrSettings.exposure;
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+                this.composer = new THREE.EffectComposer(this.renderer);
+                const renderPass = new THREE.RenderPass(this.engine.sceneManager.scene, this.engine.sceneManager.camera);
+                this.composer.addPass(renderPass);
+
+                this.bloomPass = new THREE.UnrealBloomPass(
+                    new THREE.Vector2(window.innerWidth, window.innerHeight),
+                    this.engine.pbrSettings.bloomIntensity,
+                    0.4, // radius
+                    0.85 // threshold
+                );
+                this.composer.addPass(this.bloomPass);
+
+                this.currentQuality = 'high';
+            }
+
+            setExposure(val) {
+                this.engine.pbrSettings.exposure = val;
+                this.renderer.toneMappingExposure = val;
+            }
+
+            setBloomIntensity(val) {
+                this.engine.pbrSettings.bloomIntensity = val;
+                if (this.bloomPass) this.bloomPass.strength = val;
+            }
+
+            setQualityProfile(quality) {
+                this.currentQuality = quality;
+                if (quality === 'high') {
+                    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+                    this.renderer.shadowMap.enabled = true;
+                    this.engine.sceneManager.setShadowsEnabled(true);
+                } else if (quality === 'medium') {
+                    this.renderer.setPixelRatio(1.0);
+                    this.renderer.shadowMap.enabled = true;
+                    this.engine.sceneManager.setShadowsEnabled(true);
+                } else if (quality === 'low') {
+                    this.renderer.setPixelRatio(0.85);
+                    this.renderer.shadowMap.enabled = false;
+                    this.engine.sceneManager.setShadowsEnabled(false);
+                }
+            }
+
+            onResize(width, height) {
+                this.renderer.setSize(width, height);
+                if (this.composer) this.composer.setSize(width, height);
+            }
+
+            render() {
+                if (this.composer && this.bloomPass && this.bloomPass.strength > 0) {
+                    this.composer.render();
+                } else {
+                    this.renderer.render(this.engine.sceneManager.scene, this.engine.sceneManager.camera);
+                }
+            }
+        }
+
+        /**
+         * 3. MATERIAL MANAGER
+         * Controls PBR Shader Materials, Parameter Updates, and Built-in Shading Presets
+         */
+        class MaterialManager {
+            constructor(engine) {
+                this.engine = engine;
+                this.presets = {
+                    'gold': { color: 0xffd700, roughness: 0.15, metalness: 0.95, clearcoat: 0.1, transmission: 0.0 },
+                    'chrome': { color: 0xffffff, roughness: 0.05, metalness: 1.0, clearcoat: 0.0, transmission: 0.0 },
+                    'glass': { color: 0xffffff, roughness: 0.05, metalness: 0.0, clearcoat: 1.0, transmission: 0.95 },
+                    'car-paint': { color: 0xe63946, roughness: 0.25, metalness: 0.6, clearcoat: 1.0, transmission: 0.0 },
+                    'ceramic': { color: 0xf8f9fa, roughness: 0.1, metalness: 0.0, clearcoat: 0.8, transmission: 0.0 },
+                    'emerald': { color: 0x10b981, roughness: 0.15, metalness: 0.1, clearcoat: 0.5, transmission: 0.0 },
+                    'velvet': { color: 0x8b5cf6, roughness: 0.8, metalness: 0.2, clearcoat: 0.0, transmission: 0.0 },
+                    'leather': { color: 0xb87333, roughness: 0.35, metalness: 0.9, clearcoat: 0.0, transmission: 0.0 }
+                };
+            }
+
+            createPBRMaterial(overrideParams = {}) {
+                const settings = Object.assign({}, this.engine.pbrSettings, overrideParams);
+                return new THREE.MeshPhysicalMaterial({
+                    color: settings.color,
+                    roughness: settings.roughness,
+                    metalness: settings.metalness,
+                    clearcoat: settings.clearcoat,
+                    transmission: settings.transmission,
+                    wireframe: settings.wireframe,
+                    envMapIntensity: 1.0
+                });
+            }
+
+            updateAllMaterials(callback) {
+                const model = this.engine.geometryManager.currentModel;
+                if (!model) return;
+
+                model.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        const mats = Array.isArray(child.material) ? child.material : [child.material];
+                        mats.forEach((mat) => {
+                            if (!(mat instanceof THREE.MeshStandardMaterial) && !(mat instanceof THREE.MeshPhysicalMaterial)) {
+                                const newMat = new THREE.MeshPhysicalMaterial({
+                                    map: mat.map || null,
+                                    color: mat.color ? mat.color.clone() : new THREE.Color(this.engine.pbrSettings.color),
+                                    roughness: this.engine.pbrSettings.roughness,
+                                    metalness: this.engine.pbrSettings.metalness,
+                                    clearcoat: this.engine.pbrSettings.clearcoat,
+                                    transmission: this.engine.pbrSettings.transmission,
+                                    wireframe: this.engine.pbrSettings.wireframe,
+                                    envMapIntensity: 1.0
+                                });
+                                mat.dispose();
+                                child.material = newMat;
+                                callback(newMat);
+                            } else {
+                                callback(mat);
+                            }
+                        });
+                    }
+                });
+            }
+
+            applyPreset(key) {
+                const p = this.presets[key];
+                if (!p) return;
+
+                this.updateAllMaterials((mat) => {
+                    if (p.color !== undefined) {
+                        mat.color.setHex(p.color);
+                        this.engine.pbrSettings.color = p.color;
+                    }
+                    if (p.roughness !== undefined) {
+                        mat.roughness = p.roughness;
+                        this.engine.pbrSettings.roughness = p.roughness;
+                    }
+                    if (p.metalness !== undefined) {
+                        mat.metalness = p.metalness;
+                        this.engine.pbrSettings.metalness = p.metalness;
+                    }
+                    if (p.transmission !== undefined) {
+                        mat.transmission = p.transmission;
+                        this.engine.pbrSettings.transmission = p.transmission;
+                    }
+                    mat.needsUpdate = true;
+                });
+                return p;
+            }
+        }
+
+        /**
+         * 4. GEOMETRY MANAGER
+         * Handles Primitive Creation, Draco Parsing, File Imports (.GLB, .GLTF, .OBJ, .DRC), and Focus Normalization
+         */
+        class GeometryManager {
+            constructor(engine) {
+                this.engine = engine;
+                this.currentModel = null;
+                this.loadedMeshName = "model";
+
+                this.dracoLoader = new THREE.DRACOLoader();
+                this.dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+                this.dracoLoader.setDecoderConfig({ type: 'js' });
+                this.dracoLoader.preload();
+            }
+
+            createSampleMesh(type) {
+                if (this.currentModel) this.engine.sceneManager.scene.remove(this.currentModel);
+
+                let geometry;
+                if (type === 'sphere') {
+                    geometry = new THREE.SphereGeometry(1, 48, 48);
+                    this.loadedMeshName = "sphere";
+                } else if (type === 'knot') {
+                    geometry = new THREE.TorusKnotGeometry(0.7, 0.25, 96, 24);
+                    this.loadedMeshName = "torus_knot";
+                } else if (type === 'drone') {
+                    geometry = new THREE.CylinderGeometry(0.8, 0.8, 0.6, 32);
+                    this.loadedMeshName = "sci_fi_core";
+                }
+
+                const material = this.engine.materialManager.createPBRMaterial();
+                this.currentModel = new THREE.Mesh(geometry, material);
+                this.currentModel.name = this.loadedMeshName;
+                this.currentModel.castShadow = true;
+                this.currentModel.receiveShadow = true;
+
+                this.engine.sceneManager.scene.add(this.currentModel);
+                this.focusMesh();
+
+                return {
+                    name: `Primitive: ${type.toUpperCase()}`,
+                    vertices: geometry.attributes.position.count
+                };
+            }
+
+            loadFromFile(file, onProgress, onSuccess, onError) {
+                const filename = file.name;
+                const extension = filename.split('.').pop().toLowerCase();
+
+                if (extension === 'glb' || extension === 'gltf') {
+                    const reader = new FileReader();
+                    reader.readAsArrayBuffer(file);
+                    reader.onload = (e) => {
+                        const contents = e.target.result;
+                        const loader = new THREE.GLTFLoader();
+                        loader.setDRACOLoader(this.dracoLoader);
+                        loader.parse(contents, '', (gltf) => {
+                            const stats = this.setupLoadedModel(gltf.scene, filename);
+                            onSuccess(filename, stats);
+                        }, onError);
+                    };
+                } else if (extension === 'drc') {
+                    const reader = new FileReader();
+                    reader.readAsArrayBuffer(file);
+                    reader.onload = (e) => {
+                        const contents = e.target.result;
+                        this.dracoLoader.parse(contents, (geometry) => {
+                            geometry.computeVertexNormals();
+                            const material = this.engine.materialManager.createPBRMaterial();
+                            const mesh = new THREE.Mesh(geometry, material);
+                            const stats = this.setupLoadedModel(mesh, filename);
+                            onSuccess(filename, stats);
+                        }, onError);
+                    };
+                } else if (extension === 'obj') {
+                    const reader = new FileReader();
+                    reader.readAsText(file);
+                    reader.onload = (e) => {
+                        const contents = e.target.result;
+                        const loader = new THREE.OBJLoader();
+                        const object = loader.parse(contents);
+                        const stats = this.setupLoadedModel(object, filename);
+                        onSuccess(filename, stats);
+                    };
+                } else {
+                    onError(new Error("Unsupported file format."));
+                }
+            }
+
+            setupLoadedModel(object, filename) {
+                if (this.currentModel) this.engine.sceneManager.scene.remove(this.currentModel);
+                this.currentModel = object;
+                this.loadedMeshName = filename.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9-_]/g, "_");
+
+                const box = new THREE.Box3().setFromObject(this.currentModel);
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+
+                this.currentModel.position.x = -center.x;
+                this.currentModel.position.y = -center.y + (size.y / 2);
+                this.currentModel.position.z = -center.z;
+
+                const maxDim = Math.max(size.x, size.y, size.z);
+                if (maxDim > 0) {
+                    const targetSize = 2.2;
+                    const scale = targetSize / maxDim;
+                    this.currentModel.scale.set(scale, scale, scale);
+                    this.currentModel.position.y = 0;
+                }
+
+                let vertexCount = 0;
+                this.currentModel.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        if (child.geometry && child.geometry.attributes.position) {
+                            vertexCount += child.geometry.attributes.position.count;
+                        }
+                        if (child.material) {
+                            const mats = Array.isArray(child.material) ? child.material : [child.material];
+                            mats.forEach(mat => {
+                                if (!(mat instanceof THREE.MeshStandardMaterial) && !(mat instanceof THREE.MeshPhysicalMaterial)) {
+                                    const newMat = this.engine.materialManager.createPBRMaterial({
+                                        map: mat.map || null,
+                                        color: mat.color ? mat.color.getHex() : this.engine.pbrSettings.color
+                                    });
+                                    mat.dispose();
+                                    child.material = newMat;
+                                }
+                            });
+                        }
+                    }
+                });
+
+                this.engine.sceneManager.scene.add(this.currentModel);
+                this.focusMesh();
+
+                return { vertices: vertexCount };
+            }
+
+            focusMesh() {
+                if (!this.currentModel) return;
+                this.engine.sceneManager.camera.position.set(0, 1.2, 3.8);
+                this.engine.controls.target.set(0, 0, 0);
+            }
+        }
+
+        /**
+         * 5. EXPORT MANAGER
+         * Manages 3D Export Pipelines: GLB, GLTF, OBJ, Three JSON, CSV Vertices Table
+         */
+        class ExportManager {
+            constructor(engine) {
+                this.engine = engine;
+            }
+
+            exportGLTF(options = { binary: true, draco: false }) {
+                const model = this.engine.geometryManager.currentModel;
+                if (!model) throw new Error('No active model to export');
+
+                const exporter = new THREE.GLTFExporter();
+                const exportOptions = {
+                    binary: options.binary,
+                    embedImages: true
+                };
+
+                if (options.draco) {
+                    if (typeof THREE.DRACOExporter !== 'undefined') {
+                        exportOptions.dracoOptions = {
+                            compressionLevel: this.engine.dracoCompressionLevel
+                        };
+                    } else {
+                        throw new Error('Draco Exporter library unavailable');
+                    }
+                }
+
+                return new Promise((resolve, reject) => {
+                    exporter.parse(
+                        model,
+                        (result) => {
+                            const meshName = this.engine.geometryManager.loadedMeshName;
+                            if (options.binary) {
+                                const blob = new Blob([result], { type: 'application/octet-stream' });
+                                const suffix = options.draco ? '_draco.glb' : '.glb';
+                                this.downloadBlob(blob, `${meshName}${suffix}`);
+                            } else {
+                                const output = JSON.stringify(result, null, 2);
+                                const blob = new Blob([output], { type: 'application/json' });
+                                this.downloadBlob(blob, `${meshName}.gltf`);
+                            }
+                            resolve();
+                        },
+                        reject,
+                        exportOptions
+                    );
+                });
+            }
+
+            exportOBJ() {
+                const model = this.engine.geometryManager.currentModel;
+                if (!model) throw new Error('No active model to export');
+                const exporter = new THREE.OBJExporter();
+                const result = exporter.parse(model);
+                const blob = new Blob([result], { type: 'text/plain' });
+                this.downloadBlob(blob, `${this.engine.geometryManager.loadedMeshName}.obj`);
+            }
+
+            exportJSON() {
+                const model = this.engine.geometryManager.currentModel;
+                if (!model) throw new Error('No active model to export');
+                const output = model.toJSON();
+                const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+                this.downloadBlob(blob, `${this.engine.geometryManager.loadedMeshName}.json`);
+            }
+
+            exportCSV() {
+                const model = this.engine.geometryManager.currentModel;
+                if (!model) throw new Error('No active model to export');
+
+                let csvContent = "Mesh_Name,Vertex_Index,Position_X,Position_Y,Position_Z,Normal_X,Normal_Y,Normal_Z\n";
+                let totalVertices = 0;
+
+                model.traverse((child) => {
+                    if (child.isMesh && child.geometry) {
+                        const geo = child.geometry;
+                        const pos = geo.attributes.position;
+                        const norm = geo.attributes.normal;
+                        const meshName = child.name || "Mesh";
+
+                        if (pos) {
+                            for (let i = 0; i < pos.count; i++) {
+                                const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+                                const nx = norm ? norm.getX(i) : 0, ny = norm ? norm.getY(i) : 0, nz = norm ? norm.getZ(i) : 0;
+                                csvContent += `"${meshName}",${i},${px.toFixed(6)},${py.toFixed(6)},${pz.toFixed(6)},${nx.toFixed(6)},${ny.toFixed(6)},${nz.toFixed(6)}\n`;
+                                totalVertices++;
+                            }
+                        }
+                    }
+                });
+
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                this.downloadBlob(blob, `${this.engine.geometryManager.loadedMeshName}_vertices.csv`);
+                return totalVertices;
+            }
+
+            downloadBlob(blob, filename) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+            }
+        }
+
+        /**
+         * 6. STORAGE MANAGER
+         * Handles LocalStorage Data Serializing and Persistence
+         */
+        class StorageManager {
+            constructor(engine) {
+                this.engine = engine;
+                this.STORAGE_KEY = 'pbr_studio_project';
+            }
+
+            saveProject() {
+                const projectData = {
+                    pbrSettings: this.engine.pbrSettings,
+                    dracoCompressionLevel: this.engine.dracoCompressionLevel,
+                    currentQuality: this.engine.renderPipeline.currentQuality,
+                    cameraFov: this.engine.sceneManager.camera.fov,
+                    cameraPosition: {
+                        x: this.engine.sceneManager.camera.position.x,
+                        y: this.engine.sceneManager.camera.position.y,
+                        z: this.engine.sceneManager.camera.position.z
+                    },
+                    controlsTarget: {
+                        x: this.engine.controls.target.x,
+                        y: this.engine.controls.target.y,
+                        z: this.engine.controls.target.z
+                    },
+                    loadedMeshName: this.engine.geometryManager.loadedMeshName,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(projectData));
+            }
+
+            loadProject() {
+                const saved = localStorage.getItem(this.STORAGE_KEY);
+                if (!saved) return null;
+                return JSON.parse(saved);
+            }
+        }
+
+        /**
+         * MAIN CORE PBEngine
+         * Unified Engine Architecture facade orchestrating sub-managers, loop tick, and performance adaptive scales
+         */
+        class PBEngine {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+
+                this.pbrSettings = {
+                    color: 0xffffff,
+                    roughness: 0.20,
+                    metalness: 0.80,
+                    clearcoat: 0.0,
+                    transmission: 0.0,
+                    emission: 0.0,
+                    wireframe: false,
+                    exposure: 1.0,
+                    lightIntensity: 1.5,
+                    bloomIntensity: 0.0,
+                    bgType: 'hdri',
+                    bgColor: '#090d16'
+                };
+
+                this.dracoCompressionLevel = 7;
+                this.enableAutoFps = true;
+
+                // Sub-Managers Setup
+                this.sceneManager = new SceneManager(this);
+                this.renderPipeline = new RenderPipeline(this, this.canvas);
+                this.materialManager = new MaterialManager(this);
+                this.geometryManager = new GeometryManager(this);
+                this.exportManager = new ExportManager(this);
+                this.storageManager = new StorageManager(this);
+
+                // Controls
+                this.controls = new THREE.OrbitControls(this.sceneManager.camera, this.renderPipeline.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+                this.controls.maxDistance = 15;
+                this.controls.minDistance = 0.5;
+                this.controls.touches = {
+                    ONE: THREE.TOUCH.ROTATE,
+                    TWO: THREE.TOUCH.DOLLY_PAN
+                };
+
+                // Adaptive FPS Variables
+                this.frameCount = 0;
+                this.lastFpsUpdate = performance.now();
+                this.lowFpsStreak = 0;
+                this.currentFps = 60;
+
+                this.init();
+            }
+
+            init() {
+                this.sceneManager.initProceduralHDR(this.renderPipeline.renderer);
+                this.geometryManager.createSampleMesh('sphere');
+
+                window.addEventListener('resize', () => {
+                    const width = window.innerWidth;
+                    const height = window.innerHeight;
+                    this.sceneManager.onResize(width, height);
+                    this.renderPipeline.onResize(width, height);
+                });
+            }
+
+            takeScreenshot() {
+                if (this.renderPipeline.bloomPass && this.renderPipeline.bloomPass.strength > 0) {
+                    this.renderPipeline.composer.render();
+                } else {
+                    this.renderPipeline.renderer.render(this.sceneManager.scene, this.sceneManager.camera);
+                }
+                const link = document.createElement('a');
+                link.download = `pbr-snapshot-${Date.now()}.png`;
+                link.href = this.renderPipeline.renderer.domElement.toDataURL('image/png');
+                link.click();
+            }
+
+            tick(onFpsUpdate) {
+                this.controls.update();
+
+                this.frameCount++;
+                const now = performance.now();
+                if (now - this.lastFpsUpdate >= 1000) {
+                    this.currentFps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
+                    if (onFpsUpdate) onFpsUpdate(this.currentFps);
+
+                    if (this.enableAutoFps && this.currentFps < 28 && this.renderPipeline.currentQuality !== 'low') {
+                        this.lowFpsStreak++;
+                        if (this.lowFpsStreak >= 3) {
+                            const nextQ = this.renderPipeline.currentQuality === 'high' ? 'medium' : 'low';
+                            this.renderPipeline.setQualityProfile(nextQ);
+                            this.lowFpsStreak = 0;
+                            if (this.onAutoQualityDowngrade) this.onAutoQualityDowngrade(nextQ);
+                        }
+                    } else {
+                        this.lowFpsStreak = 0;
+                    }
+
+                    this.frameCount = 0;
+                    this.lastFpsUpdate = now;
+                }
+
+                this.renderPipeline.render();
+            }
+        }
+
+        /**
+         * UI CONTROLLER
+         * Binds DOM UI elements, events, drawers, inputs, and notifications cleanly to PBEngine methods
+         */
+        class UIController {
+            constructor(engine) {
+                this.engine = engine;
+                this.initUI();
+                this.bindEvents();
+            }
+
+            initUI() {
+                // Auto-hide touch gesture hint after 6 seconds
+                setTimeout(() => {
+                    const hint = document.getElementById('gesture-hint');
+                    if (hint) hint.classList.add('opacity-0');
+                }, 6000);
+            }
+
+            bindEvents() {
+                // Drawer & UI Visibility Toggles
+                const drawer = document.getElementById('controls-drawer');
+                const openBtn = document.getElementById('btn-open-drawer');
+                const closeBtn = document.getElementById('btn-close-drawer');
+                const toggleUiBtn = document.getElementById('btn-toggle-ui');
+                const toolbar = document.getElementById('quick-toolbar');
+
+                openBtn.addEventListener('click', () => drawer.classList.remove('translate-y-full'));
+                closeBtn.addEventListener('click', () => drawer.classList.add('translate-y-full'));
+                toggleUiBtn.addEventListener('click', () => {
+                    toolbar.classList.toggle('opacity-0');
+                    toolbar.classList.toggle('pointer-events-none');
+                });
+
+                // Drawer Navigation Tabs
+                const tabs = ['material', 'env', 'mesh', 'export', 'engine'];
+                tabs.forEach(tab => {
+                    document.getElementById(`tab-btn-${tab}`).addEventListener('click', () => {
+                        tabs.forEach(t => {
+                            document.getElementById(`tab-content-${t}`).classList.add('hidden');
+                            document.getElementById(`tab-btn-${t}`).classList.remove('text-blue-400', 'border-blue-500', 'font-semibold');
+                            document.getElementById(`tab-btn-${tab}`).classList.add('text-slate-400', 'border-transparent');
+                        });
+                        document.getElementById(`tab-content-${tab}`).classList.remove('hidden');
+                        document.getElementById(`tab-btn-${tab}`).classList.add('text-blue-400', 'border-blue-500', 'font-semibold');
+                    });
+                });
+
+                // Material Sliders & Color Picker
+                this.setupSlider('input-roughness', 'val-roughness', (v) => {
+                    this.engine.pbrSettings.roughness = v;
+                    this.engine.materialManager.updateAllMaterials((mat) => { mat.roughness = v; });
+                });
+                this.setupSlider('input-metalness', 'val-metalness', (v) => {
+                    this.engine.pbrSettings.metalness = v;
+                    this.engine.materialManager.updateAllMaterials((mat) => { mat.metalness = v; });
+                });
+                this.setupSlider('input-transmission', 'val-transmission', (v) => {
+                    this.engine.pbrSettings.transmission = v;
+                    this.engine.materialManager.updateAllMaterials((mat) => { mat.transmission = v; });
+                });
+                this.setupSlider('input-clearcoat', 'val-clearcoat', (v) => {
+                    this.engine.pbrSettings.clearcoat = v;
+                    this.engine.materialManager.updateAllMaterials((mat) => { mat.clearcoat = v; });
+                });
+                this.setupSlider('input-emission', 'val-emission', (v) => {
+                    this.engine.pbrSettings.emission = v;
+                    this.engine.materialManager.updateAllMaterials((mat) => {
+                        if (mat.emissive) {
+                            mat.emissive.setHex(mat.color ? mat.color.getHex() : 0xffffff);
+                            mat.emissiveIntensity = v;
+                        }
+                    });
+                });
+
+                document.getElementById('color-picker').addEventListener('input', (e) => {
+                    const hex = parseInt(e.target.value.replace('#', '0x'), 16);
+                    this.engine.pbrSettings.color = hex;
+                    this.engine.materialManager.updateAllMaterials((mat) => { mat.color.set(e.target.value); });
+                });
+
+                document.getElementById('input-wireframe').addEventListener('change', (e) => {
+                    this.engine.pbrSettings.wireframe = e.target.checked;
+                    this.engine.materialManager.updateAllMaterials((mat) => { mat.wireframe = e.target.checked; });
+                });
+
+                // Material Presets
+                document.querySelectorAll('.btn-preset').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const presetKey = btn.dataset.preset;
+                        const p = this.engine.materialManager.applyPreset(presetKey);
+                        if (p) {
+                            if (p.color !== undefined) document.getElementById('color-picker').value = '#' + p.color.toString(16).padStart(6, '0');
+                            if (p.roughness !== undefined) {
+                                document.getElementById('input-roughness').value = p.roughness;
+                                document.getElementById('val-roughness').textContent = p.roughness.toFixed(2);
+                            }
+                            if (p.metalness !== undefined) {
+                                document.getElementById('input-metalness').value = p.metalness;
+                                document.getElementById('val-metalness').textContent = p.metalness.toFixed(2);
+                            }
+                            if (p.transmission !== undefined) {
+                                document.getElementById('input-transmission').value = p.transmission;
+                                document.getElementById('val-transmission').textContent = p.transmission.toFixed(2);
+                            }
+                            this.showToast(`Preset: ${presetKey.toUpperCase()}`, 'info');
+                        }
+                    });
+                });
+
+                // Lighting Controls
+                this.setupSlider('input-bloom', 'val-bloom', (v) => this.engine.renderPipeline.setBloomIntensity(v));
+                this.setupSlider('input-exposure', 'val-exposure', (v) => this.engine.renderPipeline.setExposure(v));
+                this.setupSlider('input-light-intensity', 'val-light-intensity', (v) => this.engine.sceneManager.setLightIntensity(v));
+
+                document.getElementById('input-light-rotation').addEventListener('input', (e) => {
+                    this.engine.sceneManager.setLightRotation(e.target.value);
+                    document.getElementById('val-light-rotation').textContent = `${e.target.value}°`;
+                });
+
+                // Background Setup Buttons
+                const bgHdriBtn = document.getElementById('bg-btn-hdri');
+                const bgColorBtn = document.getElementById('bg-btn-color');
+                const bgColorContainer = document.getElementById('bg-color-container');
+
+                bgHdriBtn.addEventListener('click', () => {
+                    this.engine.sceneManager.setBackgroundType('hdri');
+                    bgHdriBtn.className = "py-2.5 rounded-xl border border-blue-500/50 bg-blue-500/20 text-slate-200 font-medium";
+                    bgColorBtn.className = "py-2.5 rounded-xl border border-slate-700 bg-slate-800/50 text-slate-400 font-medium";
+                    bgColorContainer.classList.add('hidden');
+                });
+
+                bgColorBtn.addEventListener('click', () => {
+                    this.engine.sceneManager.setBackgroundType('color');
+                    bgColorBtn.className = "py-2.5 rounded-xl border border-blue-500/50 bg-blue-500/20 text-slate-200 font-medium";
+                    bgHdriBtn.className = "py-2.5 rounded-xl border border-slate-700 bg-slate-800/50 text-slate-400 font-medium";
+                    bgColorContainer.classList.remove('hidden');
+                });
+
+                document.getElementById('bg-color-picker').addEventListener('input', (e) => {
+                    this.engine.sceneManager.setBackgroundColor(e.target.value);
+                });
+
+                document.getElementById('input-grid').addEventListener('change', (e) => {
+                    this.engine.sceneManager.setGridVisible(e.target.checked);
+                });
+
+                // Geometry Samples
+                document.querySelectorAll('.btn-mesh').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const type = btn.dataset.mesh;
+                        const res = this.engine.geometryManager.createSampleMesh(type);
+                        document.getElementById('model-name').textContent = res.name;
+                        document.getElementById('model-info').textContent = `${res.vertices.toLocaleString()} Vertices • PBR Physical`;
+                    });
+                });
+
+                document.getElementById('input-autorotate').addEventListener('change', (e) => {
+                    this.engine.controls.autoRotate = e.target.checked;
+                    this.engine.controls.autoRotateSpeed = 2.0;
+                });
+
+                // File Uploads (Top Nav, Geometry Tab & Viewport Drag-and-Drop)
+                const fileInputs = [document.getElementById('custom-model-input'), document.getElementById('top-model-input')];
+                fileInputs.forEach(input => {
+                    if (input) {
+                        input.addEventListener('change', (e) => {
+                            if (e.target.files && e.target.files.length > 0) {
+                                this.handleFileUpload(e.target.files[0]);
+                                e.target.value = '';
+                            }
+                        });
+                    }
+                });
+
+                const viewport = document.getElementById('viewport-container');
+                viewport.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
+                viewport.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        this.handleFileUpload(e.dataTransfer.files[0]);
+                    }
+                });
+
+                // Export Handlers
+                document.getElementById('input-draco-level').addEventListener('input', (e) => {
+                    this.engine.dracoCompressionLevel = parseInt(e.target.value);
+                    document.getElementById('val-draco-level').textContent = this.engine.dracoCompressionLevel;
+                });
+
+                document.getElementById('btn-export-draco').addEventListener('click', () => {
+                    this.engine.exportManager.exportGLTF({ binary: true, draco: true })
+                        .then(() => this.showToast('Exported Draco Compressed .GLB', 'success'))
+                        .catch((err) => this.showToast(err.message || 'Export error', 'error'));
+                });
+
+                document.getElementById('btn-export-glb').addEventListener('click', () => {
+                    this.engine.exportManager.exportGLTF({ binary: true, draco: false })
+                        .then(() => this.showToast('Exported .GLB', 'success'))
+                        .catch((err) => this.showToast(err.message || 'Export error', 'error'));
+                });
+
+                document.getElementById('btn-export-gltf').addEventListener('click', () => {
+                    this.engine.exportManager.exportGLTF({ binary: false, draco: false })
+                        .then(() => this.showToast('Exported .GLTF', 'success'))
+                        .catch((err) => this.showToast(err.message || 'Export error', 'error'));
+                });
+
+                document.getElementById('btn-export-obj').addEventListener('click', () => {
+                    try {
+                        this.engine.exportManager.exportOBJ();
+                        this.showToast('Exported .OBJ', 'success');
+                    } catch (e) { this.showToast(e.message, 'error'); }
+                });
+
+                document.getElementById('btn-export-json').addEventListener('click', () => {
+                    try {
+                        this.engine.exportManager.exportJSON();
+                        this.showToast('Exported Three.js JSON', 'success');
+                    } catch (e) { this.showToast(e.message, 'error'); }
+                });
+
+                document.getElementById('btn-export-csv').addEventListener('click', () => {
+                    try {
+                        const count = this.engine.exportManager.exportCSV();
+                        this.showToast(`Exported ${count.toLocaleString()} vertices to .CSV`, 'success');
+                    } catch (e) { this.showToast(e.message, 'error'); }
+                });
+
+                // LocalStorage Controls
+                document.getElementById('btn-save-storage').addEventListener('click', () => {
+                    try {
+                        this.engine.storageManager.saveProject();
+                        this.showToast('Project saved to Local Storage!', 'success');
+                    } catch (e) { this.showToast('Failed to save to Local Storage', 'error'); }
+                });
+
+                document.getElementById('btn-load-storage').addEventListener('click', () => {
+                    const data = this.engine.storageManager.loadProject();
+                    if (!data) {
+                        this.showToast('No saved project found in Local Storage', 'error');
+                        return;
+                    }
+                    this.syncUIWithStorageData(data);
+                    this.showToast('Project loaded from Local Storage!', 'success');
+                });
+
+                // Performance & Engine Settings
+                document.querySelectorAll('.btn-perf-preset').forEach(btn => {
+                    btn.addEventListener('click', () => this.setQuality(btn.dataset.quality));
+                });
+
+                document.getElementById('btn-perf-toggle').addEventListener('click', () => {
+                    const curr = this.engine.renderPipeline.currentQuality;
+                    const nextQ = curr === 'high' ? 'medium' : curr === 'medium' ? 'low' : 'high';
+                    this.setQuality(nextQ);
+                });
+
+                document.getElementById('input-shadows').addEventListener('change', (e) => {
+                    this.engine.sceneManager.setShadowsEnabled(e.target.checked);
+                    this.engine.renderPipeline.renderer.shadowMap.enabled = e.target.checked;
+                });
+
+                document.getElementById('input-autofps').addEventListener('change', (e) => {
+                    this.engine.enableAutoFps = e.target.checked;
+                });
+
+                this.setupSlider('input-fov', 'val-fov', (v) => {
+                    this.engine.sceneManager.camera.fov = v;
+                    this.engine.sceneManager.camera.updateProjectionMatrix();
+                }, '°');
+
+                this.engine.onAutoQualityDowngrade = (q) => {
+                    document.getElementById('perf-badge').textContent = q.toUpperCase();
+                    this.showToast('Auto-adjusted quality for smooth FPS', 'info');
+                };
+
+                // Quick Action Bar
+                document.getElementById('btn-quick-gold').addEventListener('click', () => {
+                    this.engine.materialManager.applyPreset('gold');
+                    this.showToast('Preset: GOLD', 'info');
+                });
+                document.getElementById('btn-quick-chrome').addEventListener('click', () => {
+                    this.engine.materialManager.applyPreset('chrome');
+                    this.showToast('Preset: CHROME', 'info');
+                });
+                document.getElementById('btn-quick-glass').addEventListener('click', () => {
+                    this.engine.materialManager.applyPreset('glass');
+                    this.showToast('Preset: GLASS', 'info');
+                });
+                document.getElementById('btn-focus-mesh').addEventListener('click', () => this.engine.geometryManager.focusMesh());
+                document.getElementById('btn-screenshot').addEventListener('click', () => {
+                    this.engine.takeScreenshot();
+                    this.showToast('Snapshot saved', 'success');
+                });
+            }
+
+            handleFileUpload(file) {
+                const spinner = document.getElementById('loading-spinner');
+                const loadingProgress = document.getElementById('loading-progress');
+                spinner.classList.remove('hidden');
+                spinner.classList.remove('opacity-0');
+                loadingProgress.textContent = `Loading ${file.name}...`;
+
+                this.engine.geometryManager.loadFromFile(
+                    file,
+                    null,
+                    (filename, stats) => {
+                        document.getElementById('model-name').textContent = filename;
+                        document.getElementById('model-info').textContent = `${stats.vertices.toLocaleString()} Vertices • Uploaded`;
+                        spinner.classList.add('opacity-0');
+                        setTimeout(() => spinner.classList.add('hidden'), 300);
+                        this.showToast(`Loaded ${filename}`, 'success');
+                    },
+                    (err) => {
+                        console.error(err);
+                        this.showToast(err.message || 'Error parsing model file', 'error');
+                        spinner.classList.add('opacity-0');
+                        setTimeout(() => spinner.classList.add('hidden'), 300);
+                    }
+                );
+            }
+
+            setQuality(q) {
+                this.engine.renderPipeline.setQualityProfile(q);
+                document.getElementById('perf-badge').textContent = q.toUpperCase();
+                this.showToast(`Quality: ${q.toUpperCase()}`, 'info');
+            }
+
+            syncUIWithStorageData(data) {
+                if (data.pbrSettings) {
+                    Object.assign(this.engine.pbrSettings, data.pbrSettings);
+                    const s = this.engine.pbrSettings;
+
+                    document.getElementById('color-picker').value = '#' + s.color.toString(16).padStart(6, '0');
+                    document.getElementById('input-roughness').value = s.roughness;
+                    document.getElementById('val-roughness').textContent = s.roughness.toFixed(2);
+                    document.getElementById('input-metalness').value = s.metalness;
+                    document.getElementById('val-metalness').textContent = s.metalness.toFixed(2);
+                    document.getElementById('input-transmission').value = s.transmission;
+                    document.getElementById('val-transmission').textContent = s.transmission.toFixed(2);
+                    document.getElementById('input-clearcoat').value = s.clearcoat;
+                    document.getElementById('val-clearcoat').textContent = s.clearcoat.toFixed(2);
+                    document.getElementById('input-emission').value = s.emission;
+                    document.getElementById('val-emission').textContent = s.emission.toFixed(2);
+                    document.getElementById('input-wireframe').checked = s.wireframe;
+
+                    document.getElementById('input-exposure').value = s.exposure;
+                    document.getElementById('val-exposure').textContent = s.exposure.toFixed(2);
+                    this.engine.renderPipeline.setExposure(s.exposure);
+
+                    document.getElementById('input-light-intensity').value = s.lightIntensity;
+                    document.getElementById('val-light-intensity').textContent = s.lightIntensity.toFixed(2);
+                    this.engine.sceneManager.setLightIntensity(s.lightIntensity);
+
+                    document.getElementById('input-bloom').value = s.bloomIntensity;
+                    document.getElementById('val-bloom').textContent = s.bloomIntensity.toFixed(2);
+                    this.engine.renderPipeline.setBloomIntensity(s.bloomIntensity);
+
+                    if (s.bgType === 'color') {
+                        document.getElementById('bg-color-picker').value = s.bgColor;
+                        document.getElementById('bg-btn-color').click();
+                    } else {
+                        document.getElementById('bg-btn-hdri').click();
+                    }
+
+                    this.engine.materialManager.updateAllMaterials((mat) => {
+                        mat.color.set(s.color);
+                        mat.roughness = s.roughness;
+                        mat.metalness = s.metalness;
+                        mat.clearcoat = s.clearcoat;
+                        mat.transmission = s.transmission;
+                        mat.wireframe = s.wireframe;
+                        if (mat.emissive) {
+                            mat.emissive.setHex(s.color);
+                            mat.emissiveIntensity = s.emission;
+                        }
+                        mat.needsUpdate = true;
+                    });
+                }
+
+                if (data.cameraFov) {
+                    this.engine.sceneManager.camera.fov = data.cameraFov;
+                    document.getElementById('input-fov').value = data.cameraFov;
+                    document.getElementById('val-fov').textContent = data.cameraFov + '°';
+                    this.engine.sceneManager.camera.updateProjectionMatrix();
+                }
+
+                if (data.cameraPosition && data.controlsTarget) {
+                    this.engine.sceneManager.camera.position.set(data.cameraPosition.x, data.cameraPosition.y, data.cameraPosition.z);
+                    this.engine.controls.target.set(data.controlsTarget.x, data.controlsTarget.y, data.controlsTarget.z);
+                    this.engine.controls.update();
+                }
+
+                if (data.currentQuality) {
+                    this.setQuality(data.currentQuality);
+                }
+            }
+
+            setupSlider(inputId, valId, callback, suffix = '') {
+                const input = document.getElementById(inputId);
+                const valSpan = document.getElementById(valId);
+                input.addEventListener('input', (e) => {
+                    const val = parseFloat(e.target.value);
+                    valSpan.textContent = `${val.toFixed(2)}${suffix}`;
+                    callback(val);
+                });
+            }
+
+            showToast(msg, type = 'info') {
+                const toast = document.getElementById('toast');
+                document.getElementById('toast-msg').textContent = msg;
+                toast.classList.remove('opacity-0');
+                setTimeout(() => toast.classList.add('opacity-0'), 2200);
+            }
+        }
+
+        // Global Application Entrypoint Initialization
+        window.addEventListener('load', () => {
+            const engine = new PBEngine('webgl-canvas');
+            const ui = new UIController(engine);
+
+            // Start Master Render Loop
+            function animateLoop() {
+                requestAnimationFrame(animateLoop);
+                engine.tick((fps) => {
+                    document.getElementById('fps-counter').textContent = `${fps} FPS`;
+                });
+            }
+            animateLoop();
+        });
+    </script>
+</body>
+</html>
+```
